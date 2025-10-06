@@ -6,7 +6,6 @@ from typing import List, Tuple, Dict, Set, Optional, FrozenSet
 class RegExTree:
     root: int
     sub: Tuple["RegExTree", ...] = ()
-    charclass: Optional[Set[str]] = None
 
     def _label(self) -> str:
         if self.root == RegEx.CONCAT: return "·"  
@@ -14,7 +13,6 @@ class RegExTree:
         if self.root == RegEx.ALTERN: return "|"
         if self.root == RegEx.DOT:    return "."
         if self.root == RegEx.PLUS:   return "+"
-        if self.root == RegEx.CLASS:  return "[class]" 
         return chr(self.root)
 
     def __str__(self) -> str:
@@ -272,7 +270,6 @@ class RegEx:
     ALTERN = 0xA17E54
     DOT    = 0xD07
     PLUS   = 0xA11ADD
-    CLASS  = 0xC1A55
 
     _PREC = {  
         ETOILE: 3,  
@@ -312,49 +309,12 @@ class RegEx:
             elif ch == ')':
                 out.append(ord(')'))
                 i += 1
-            elif ch == '[':                            
-                i += 1
-                if i >= n:
-                    raise ValueError("Classe non fermée '['")
-                chars: Set[str] = set()
-                invert = False
-
-                start_i = i
-                buf: List[str] = []
-                while i < n and s[i] != ']':
-                    buf.append(s[i])
-                    i += 1
-                if i >= n or s[i] != ']':
-                    raise ValueError("Classe non fermée ']' manquante")
-                i += 1
-
-                j = 0
-                m = len(buf)
-                while j < m:
-                    c1 = buf[j]
-                    if j + 2 < m and buf[j+1] == '-' and buf[j+2] != ']':
-                        c2 = buf[j+2]
-                        a, b = ord(c1), ord(c2)
-                        if a <= b:
-                            for k in range(a, b + 1):
-                                chars.add(chr(k))
-                        else:
-                            for k in range(b, a + 1):
-                                chars.add(chr(k))
-                        j += 3
-                    else:
-                        chars.add(c1)
-                        j += 1
-
-                out.append(("CLASS", chars))
             else:
                 out.append(ord(ch))
                 i += 1
         return out
 
     def _is_literal(self, t: object) -> bool:
-        if isinstance(t, tuple) and len(t) == 2 and t[0] == "CLASS":
-            return True
         return t not in (self.DOT, self.ETOILE, getattr(self, "PLUS", 0xDEADBEEF),
                         self.ALTERN, ord('('), ord(')'), self.CONCAT)
 
@@ -402,10 +362,7 @@ class RegEx:
     def _postfix_to_tree(self, postfix: List[object]) -> RegExTree:
         stack: List[RegExTree] = []
         for t in postfix:
-            if isinstance(t, tuple) and t[0] == "CLASS":           
-                chars: Set[str] = t[1]
-                stack.append(RegExTree(self.CLASS, charclass=set(chars)))
-            elif self._is_literal(t) or t == self.DOT:
+            if self._is_literal(t) or t == self.DOT:
                 stack.append(RegExTree(t if isinstance(t, int) else ord('?')))
             elif t == self.ETOILE:
                 if not stack: raise ValueError("* sans opérande")
@@ -483,9 +440,6 @@ class RegEx:
                 t = nfa.new_state()
                 if node.root == self.DOT:
                     nfa.add_edge(s, ".", t)
-                elif node.root == self.CLASS:                      
-                    for ch in (node.charclass or set()):
-                        nfa.add_edge(s, ch, t)
                 else:
                     nfa.add_edge(s, chr(node.root), t)
                 return s, t
