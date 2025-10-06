@@ -7,19 +7,6 @@ class RegExTree:
     root: int
     sub: Tuple["RegExTree", ...] = ()
 
-    def _label(self) -> str:
-        if self.root == RegEx.CONCAT: return "·"
-        if self.root == RegEx.ETOILE: return "*"
-        if self.root == RegEx.ALTERN: return "|"
-        if self.root == RegEx.DOT:    return "."
-        if self.root == RegEx.PLUS:   return "+"
-        return chr(self.root)
-
-    def __str__(self) -> str:
-        if not self.sub:
-            return self._label()
-        return f"{self._label()}(" + ",".join(str(c) for c in self.sub) + ")"
-
 EPSILON: Optional[str] = None
 
 class NFA:
@@ -27,33 +14,21 @@ class NFA:
         self.start: int = -1
         self.accept: int = -1
         self.transitions: Dict[int, List[Tuple[Optional[str], int]]] = {}
-        self._next_id = 0
+        self._nextId = 0
 
-    def new_state(self) -> int:
-        s = self._next_id
-        self._next_id += 1
+    def newState(self) -> int:
+        s = self._nextId
+        self._nextId += 1
         if s not in self.transitions:
             self.transitions[s] = []
         return s
 
-    def add_edge(self, src: int, symbol: Optional[str], dst: int) -> None:
+    def addEdge(self, src: int, symbol: Optional[str], dst: int) -> None:
         self.transitions.setdefault(src, []).append((symbol, dst))
         self.transitions.setdefault(dst, self.transitions.get(dst, []))
 
-    def __str__(self) -> str:
-        lines = []
-        lines.append(f"States: {sorted(self.transitions.keys())}")
-        lines.append(f"Start : {self.start}")
-        lines.append(f"Accept: {self.accept}")
-        lines.append("Transitions:")
-        for s in sorted(self.transitions.keys()):
-            for sym, t in self.transitions[s]:
-                lab = "ε" if sym is None else (sym if sym != "." else ".(any)")
-                lines.append(f"  {s} --{lab}--> {t}")
-        return "\n".join(lines)
-
-    def to_dfa(self) -> "DFA":
-        def eps_closure(states: Set[int]) -> Set[int]:
+    def toDfa(self) -> "DFA":
+        def epsClosure(states: Set[int]) -> Set[int]:
             stack = list(states)
             closure = set(states)
             while stack:
@@ -72,7 +47,7 @@ class NFA:
                         out.add(nxt)
             return out
 
-        def move_dot(states: Set[int]) -> Set[int]:
+        def moveDot(states: Set[int]) -> Set[int]:
             out: Set[int] = set()
             for s in states:
                 for sym, nxt in self.transitions.get(s, []):
@@ -81,58 +56,58 @@ class NFA:
             return out
 
         literals: Set[str] = set()
-        has_dot = False
-        for s, edges in self.transitions.items():
+        hasDot = False
+        for _, edges in self.transitions.items():
             for sym, _ in edges:
                 if sym is None:
                     continue
                 if sym == ".":
-                    has_dot = True
+                    hasDot = True
                 else:
                     literals.add(sym)
 
-        start_set = frozenset(eps_closure({self.start}))
+        startSet = frozenset(epsClosure({self.start}))
 
         dfa = DFA()
         dfa.alphabet = set(literals)
 
-        subset_to_q: Dict[FrozenSet[int], int] = {start_set: 0}
+        subsetToQ: Dict[FrozenSet[int], int] = {startSet: 0}
         dfa.transitions[0] = {}
         dfa.start = 0
-        if self.accept in start_set:
+        if self.accept in startSet:
             dfa.accepts.add(0)
 
-        worklist: List[FrozenSet[int]] = [start_set]
+        worklist: List[FrozenSet[int]] = [startSet]
 
         while worklist:
             S = worklist.pop()
-            q = subset_to_q[S]
+            q = subsetToQ[S]
 
-            Tdot_core = move_dot(S) if has_dot else set()
-            if Tdot_core:
-                Tdot = frozenset(eps_closure(Tdot_core))
-                if Tdot not in subset_to_q:
-                    subset_to_q[Tdot] = len(subset_to_q)
-                    dfa.transitions[subset_to_q[Tdot]] = {}
-                    if self.accept in Tdot:
-                        dfa.accepts.add(subset_to_q[Tdot])
-                    worklist.append(Tdot)
-                dfa.transitions[q]["."] = subset_to_q[Tdot]
+            tdotCore = moveDot(S) if hasDot else set()
+            if tdotCore:
+                tdot = frozenset(epsClosure(tdotCore))
+                if tdot not in subsetToQ:
+                    subsetToQ[tdot] = len(subsetToQ)
+                    dfa.transitions[subsetToQ[tdot]] = {}
+                    if self.accept in tdot:
+                        dfa.accepts.add(subsetToQ[tdot])
+                    worklist.append(tdot)
+                dfa.transitions[q]["."] = subsetToQ[tdot]
 
             for a in literals:
-                target_core = move(S, a)
-                if has_dot:
-                    target_core |= Tdot_core
-                if not target_core:
+                targetCore = move(S, a)
+                if hasDot:
+                    targetCore |= tdotCore
+                if not targetCore:
                     continue
-                T = frozenset(eps_closure(target_core))
-                if T not in subset_to_q:
-                    subset_to_q[T] = len(subset_to_q)
-                    dfa.transitions[subset_to_q[T]] = {}
+                T = frozenset(epsClosure(targetCore))
+                if T not in subsetToQ:
+                    subsetToQ[T] = len(subsetToQ)
+                    dfa.transitions[subsetToQ[T]] = {}
                     if self.accept in T:
-                        dfa.accepts.add(subset_to_q[T])
+                        dfa.accepts.add(subsetToQ[T])
                     worklist.append(T)
-                dfa.transitions[q][a] = subset_to_q[T]
+                dfa.transitions[q][a] = subsetToQ[T]
 
         return dfa
 
@@ -143,20 +118,7 @@ class DFA:
         self.transitions: Dict[int, Dict[str, int]] = {}
         self.alphabet: Set[str] = set()
 
-    def __str__(self) -> str:
-        lines = []
-        states = sorted(self.transitions.keys())
-        lines.append(f"States: {states}")
-        lines.append(f"Start : {self.start}")
-        lines.append(f"Accepts: {sorted(self.accepts)}")
-        lines.append(f"Alphabet: {sorted(self.alphabet)}")
-        lines.append("Transitions:")
-        for q in states:
-            for a, qq in sorted(self.transitions[q].items()):
-                lines.append(f"  {q} --{a}--> {qq}")
-        return "\n".join(lines)
-
-    def _reachable(self) -> Set[int]:
+    def reachable(self) -> Set[int]:
         seen: Set[int] = set()
         stack = [self.start]
         while stack:
@@ -164,23 +126,23 @@ class DFA:
             if q in seen:
                 continue
             seen.add(q)
-            for a, qq in self.transitions.get(q, {}).items():
+            for _, qq in self.transitions.get(q, {}).items():
                 if qq not in seen:
                     stack.append(qq)
         return seen
 
-    def _make_total(self) -> None:
-        need_sink = False
-        for q, outs in self.transitions.items():
+    def makeTotal(self) -> None:
+        needSink = False
+        for _, outs in self.transitions.items():
             for a in self.alphabet:
                 if a not in outs:
-                    need_sink = True
+                    needSink = True
                     break
             if "." not in outs:
-                need_sink = True
-            if need_sink:
+                needSink = True
+            if needSink:
                 break
-        if not need_sink:
+        if not needSink:
             return
 
         sink = max(self.transitions.keys()) + 1 if self.transitions else 0
@@ -197,7 +159,7 @@ class DFA:
                 self.transitions[q]["."] = sink
 
     def minimize(self) -> "DFA":
-        reachable = self._reachable()
+        reachable = self.reachable()
         transitions = {
             q: {a: qq for a, qq in outs.items() if qq in reachable}
             for q, outs in self.transitions.items() if q in reachable
@@ -208,59 +170,59 @@ class DFA:
         self.transitions = transitions
         self.accepts = accepts
         self.start = start
-        self._make_total()
+        self.makeTotal()
 
         states = sorted(self.transitions.keys())
         accepts = set(self.accepts)
-        non_accepts = set(states) - accepts
+        nonAccepts = set(states) - accepts
 
         P: List[Set[int]] = []
         if accepts:
             P.append(set(accepts))
-        if non_accepts:
-            P.append(set(non_accepts))
+        if nonAccepts:
+            P.append(set(nonAccepts))
 
         changed = True
         while changed:
             changed = False
             newP: List[Set[int]] = []
             for block in P:
-                sig_to_subset: Dict[Tuple[int, ...], Set[int]] = {}
+                sigToSubset: Dict[Tuple[int, ...], Set[int]] = {}
 
-                class_of: Dict[int, int] = {}
+                classOf: Dict[int, int] = {}
                 for idx, cls in enumerate(P):
                     for q in cls:
-                        class_of[q] = idx
+                        classOf[q] = idx
 
                 for q in block:
                     sig: List[int] = []
                     for a in sorted(self.alphabet) + ["."]:
                         qq = self.transitions[q][a]
-                        sig.append(class_of[qq])
+                        sig.append(classOf[qq])
                     tup = tuple(sig)
-                    sig_to_subset.setdefault(tup, set()).add(q)
+                    sigToSubset.setdefault(tup, set()).add(q)
 
-                parts = list(sig_to_subset.values())
+                parts = list(sigToSubset.values())
                 newP.extend(parts)
                 if len(parts) > 1:
                     changed = True
 
             P = newP
 
-        state_to_block: Dict[int, int] = {}
+        stateToBlock: Dict[int, int] = {}
         for i, block in enumerate(P):
             for q in block:
-                state_to_block[q] = i
+                stateToBlock[q] = i
 
         dfa = DFA()
         dfa.alphabet = set(self.alphabet)
-        dfa.start = state_to_block[self.start]
+        dfa.start = stateToBlock[self.start]
         for i, block in enumerate(P):
             dfa.transitions[i] = {}
             rep = next(iter(block))
             for a in sorted(dfa.alphabet):
-                dfa.transitions[i][a] = state_to_block[self.transitions[rep][a]]
-            dfa.transitions[i]["."] = state_to_block[self.transitions[rep]["."]]
+                dfa.transitions[i][a] = stateToBlock[self.transitions[rep][a]]
+            dfa.transitions[i]["."] = stateToBlock[self.transitions[rep]["."]]
             if block & self.accepts:
                 dfa.accepts.add(i)
 
@@ -271,7 +233,7 @@ class DFA:
         n = len(text)
         for i in range(n):
             q = self.start
-            accepted_end = None
+            acceptedEnd = None
             for j in range(i, n):
                 ch = text[j]
                 outs = self.transitions.get(q, {})
@@ -282,9 +244,9 @@ class DFA:
                     break
                 q = qq
                 if q in self.accepts:
-                    accepted_end = j + 1
-            if accepted_end is not None:
-                results.append((i, accepted_end, text[i:accepted_end]))
+                    acceptedEnd = j + 1
+            if acceptedEnd is not None:
+                results.append((i, acceptedEnd, text[i:acceptedEnd]))
         return results
 
 class RegEx:
@@ -303,12 +265,12 @@ class RegEx:
 
     def __init__(self, pattern: str):
         self.pattern = pattern
-        tokens = self._tokenize(pattern)
-        tokens = self._insert_concats(tokens)
-        postfix = self._to_postfix(tokens)
-        self.tree = self._postfix_to_tree(postfix)
+        tokens = self.tokenize(pattern)
+        tokens = self.insertConcats(tokens)
+        postfix = self.toPostfix(tokens)
+        self.tree = self.postfixToTree(postfix)
 
-    def _tokenize(self, s: str) -> List[object]:
+    def tokenize(self, s: str) -> List[object]:
         out: List[object] = []
         i = 0
         n = len(s)
@@ -337,33 +299,33 @@ class RegEx:
                 i += 1
         return out
 
-    def _is_literal(self, t: object) -> bool:
+    def isLiteral(self, t: object) -> bool:
         return t not in (self.DOT, self.ETOILE, getattr(self, "PLUS", 0xDEADBEEF),
-                        self.ALTERN, ord('('), ord(')'), self.CONCAT)
+                         self.ALTERN, ord('('), ord(')'), self.CONCAT)
 
-    def _insert_concats(self, tokens: List[object]) -> List[object]:
+    def insertConcats(self, tokens: List[object]) -> List[object]:
         out: List[object] = []
         for i, t in enumerate(tokens):
             out.append(t)
             if i + 1 < len(tokens):
                 a, b = t, tokens[i + 1]
-                a_can_end   = self._is_literal(a) or a in (self.DOT, ord(')'), self.ETOILE, getattr(self, "PLUS", None))
-                b_can_begin = self._is_literal(b) or b in (self.DOT, ord('('))
-                if a_can_end and b_can_begin:
+                aCanEnd   = self.isLiteral(a) or a in (self.DOT, ord(')'), self.ETOILE, getattr(self, "PLUS", None))
+                bCanBegin = self.isLiteral(b) or b in (self.DOT, ord('('))
+                if aCanEnd and bCanBegin:
                     out.append(self.CONCAT)
         return out
 
-    def _to_postfix(self, tokens: List[object]) -> List[object]:
+    def toPostfix(self, tokens: List[object]) -> List[object]:
         out: List[object] = []
         ops: List[int] = []
         for t in tokens:
-            if self._is_literal(t) or t == self.DOT:
+            if self.isLiteral(t) or t == self.DOT:
                 out.append(t)
             elif t == self.ETOILE or t == getattr(self, "PLUS", None):
                 out.append(t)
             elif t in (self.CONCAT, self.ALTERN):
                 while ops and ops[-1] not in (ord('('), ord(')')) and \
-                    self._PREC.get(ops[-1], 0) >= self._PREC.get(t, 0):
+                      self._PREC.get(ops[-1], 0) >= self._PREC.get(t, 0):
                     out.append(ops.pop())
                 ops.append(t)
             elif t == ord('('):
@@ -371,7 +333,8 @@ class RegEx:
             elif t == ord(')'):
                 while ops and ops[-1] != ord('('):
                     out.append(ops.pop())
-                if not ops: raise ValueError("Parenthèse fermante sans ouvrante")
+                if not ops:
+                    raise ValueError("Parenthèse fermante sans ouvrante")
                 ops.pop()
             else:
                 raise ValueError("Token inconnu")
@@ -381,21 +344,24 @@ class RegEx:
             out.append(ops.pop())
         return out
 
-    def _postfix_to_tree(self, postfix: List[object]) -> RegExTree:
+    def postfixToTree(self, postfix: List[object]) -> RegExTree:
         stack: List[RegExTree] = []
         for t in postfix:
-            if self._is_literal(t) or t == self.DOT:
+            if self.isLiteral(t) or t == self.DOT:
                 stack.append(RegExTree(t if isinstance(t, int) else ord('?')))
             elif t == self.ETOILE:
-                if not stack: raise ValueError("* sans opérande")
+                if not stack:
+                    raise ValueError("* sans opérande")
                 a = stack.pop()
                 stack.append(RegExTree(self.ETOILE, (a,)))
             elif t == getattr(self, "PLUS", None):
-                if not stack: raise ValueError("+ sans opérande")
+                if not stack:
+                    raise ValueError("+ sans opérande")
                 a = stack.pop()
                 stack.append(RegExTree(self.PLUS, (a,)))
             elif t in (self.CONCAT, self.ALTERN):
-                if len(stack) < 2: raise ValueError("Opérateur binaire sans 2 opérandes")
+                if len(stack) < 2:
+                    raise ValueError("Opérateur binaire sans 2 opérandes")
                 b, a = stack.pop(), stack.pop()
                 stack.append(RegExTree(t, (a, b)))
             else:
@@ -404,100 +370,51 @@ class RegEx:
             raise ValueError("Construction d'arbre invalide")
         return stack[0]
 
-    def match(self, text: str) -> bool:
-        memo: Dict[Tuple[int, int, Tuple[int, ...]], Set[int]] = {}
-        ends = self._advance(self.tree, 0, text, memo)
-        return any(pos == len(text) for pos in ends)
-
-    def _advance(self, node: RegExTree, i: int, s: str,
-                 memo: Dict[Tuple[int, int, Tuple[int, ...]], Set[int]]) -> Set[int]:
-        key = (node.root, i, tuple(id(ch) for ch in node.sub))
-        if key in memo: return memo[key]
-        res: Set[int] = set()
-
-        if not node.sub:
-            if i < len(s):
-                if node.root == self.DOT:
-                    res = {i + 1}
-                else:
-                    res = {i + 1} if s[i] == chr(node.root) else set()
-        elif node.root == self.CONCAT:
-            left, right = node.sub
-            mids = self._advance(left, i, s, memo)
-            out: Set[int] = set()
-            for m in mids:
-                out |= self._advance(right, m, s, memo)
-            res = out
-        elif node.root == self.ALTERN:
-            left, right = node.sub
-            res = self._advance(left, i, s, memo) | self._advance(right, i, s, memo)
-        elif node.root == self.ETOILE:
-            (child,) = node.sub
-            closure: Set[int] = {i}
-            frontier: List[int] = [i]
-            seen: Set[int] = set([i])
-            while frontier:
-                cur = frontier.pop()
-                for npos in self._advance(child, cur, s, memo):
-                    if npos not in seen:
-                        seen.add(npos)
-                        closure.add(npos)
-                        frontier.append(npos)
-            res = closure
-        else:
-            raise RuntimeError("Nœud inconnu")
-
-        memo[key] = res
-        return res
-
-    def ascii_codes(self) -> str:
-        return "[" + ",".join(str(ord(c)) for c in self.pattern) + "]"
-
-    def to_nfa(self) -> NFA:
+    def toNfa(self) -> NFA:
         def build(node: RegExTree, nfa: NFA) -> Tuple[int, int]:
             if not node.sub:
-                s = nfa.new_state()
-                t = nfa.new_state()
+                s = nfa.newState()
+                t = nfa.newState()
                 if node.root == self.DOT:
-                    nfa.add_edge(s, ".", t)
+                    nfa.addEdge(s, ".", t)
                 else:
-                    nfa.add_edge(s, chr(node.root), t)
+                    nfa.addEdge(s, chr(node.root), t)
                 return s, t
 
             if node.root == self.CONCAT:
-                l_start, l_accept = build(node.sub[0], nfa)
-                r_start, r_accept = build(node.sub[1], nfa)
-                nfa.add_edge(l_accept, EPSILON, r_start)
-                return l_start, r_accept
+                lStart, lAccept = build(node.sub[0], nfa)
+                rStart, rAccept = build(node.sub[1], nfa)
+                nfa.addEdge(lAccept, EPSILON, rStart)
+                return lStart, rAccept
 
             if node.root == self.ALTERN:
-                s = nfa.new_state()
-                t = nfa.new_state()
-                l_start, l_accept = build(node.sub[0], nfa)
-                r_start, r_accept = build(node.sub[1], nfa)
-                nfa.add_edge(s, EPSILON, l_start)
-                nfa.add_edge(s, EPSILON, r_start)
-                nfa.add_edge(l_accept, EPSILON, t)
-                nfa.add_edge(r_accept, EPSILON, t)
+                s = nfa.newState()
+                t = nfa.newState()
+                lStart, lAccept = build(node.sub[0], nfa)
+                rStart, rAccept = build(node.sub[1], nfa)
+                nfa.addEdge(s, EPSILON, lStart)
+                nfa.addEdge(s, EPSILON, rStart)
+                nfa.addEdge(lAccept, EPSILON, t)
+                nfa.addEdge(rAccept, EPSILON, t)
                 return s, t
 
             if node.root == self.ETOILE:
-                s = nfa.new_state()
-                t = nfa.new_state()
-                c_start, c_accept = build(node.sub[0], nfa)
-                nfa.add_edge(s, EPSILON, t)
-                nfa.add_edge(s, EPSILON, c_start)
-                nfa.add_edge(c_accept, EPSILON, t)
-                nfa.add_edge(c_accept, EPSILON, c_start)
+                s = nfa.newState()
+                t = nfa.newState()
+                cStart, cAccept = build(node.sub[0], nfa)
+                nfa.addEdge(s, EPSILON, t)
+                nfa.addEdge(s, EPSILON, cStart)
+                nfa.addEdge(cAccept, EPSILON, t)
+                nfa.addEdge(cAccept, EPSILON, cStart)
                 return s, t
 
             if node.root == self.PLUS:
-                s = nfa.new_state()
-                t = nfa.new_state()
-                c_start, c_accept = build(node.sub[0], nfa)
-                nfa.add_edge(s, EPSILON, c_start)
-                nfa.add_edge(c_accept, EPSILON, t)
-                nfa.add_edge(c_accept, EPSILON, c_start)
+                s = nfa.newState()
+                t = nfa.newState()
+                cStart, cAccept = build(node.sub[0], nfa)
+                nfa.addEdge(s, EPSILON, cStart)
+                nfa.addEdge(cAccept, EPSILON, t)
+                nfa.addEdge(cAccept, EPSILON, cStart)
                 return s, t
 
             raise RuntimeError("Nœud inconnu")
@@ -513,21 +430,21 @@ def main(argv: List[str]) -> None:
         sys.exit(2)
 
     pattern = argv[1]
-    file_path = argv[2]
+    filePath = argv[2]
 
     try:
         rx = RegEx(pattern)
-        min_dfa = rx.to_nfa().to_dfa().minimize()
+        minDfa = rx.toNfa().toDfa().minimize()
 
-        found_any = False
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            for raw_line in f:
-                line = raw_line.rstrip("\n")
-                if min_dfa.search(line):
-                    print(raw_line, end="")
-                    found_any = True
+        foundAny = False
+        with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
+            for rawLine in f:
+                line = rawLine.rstrip("\n")
+                if minDfa.search(line):
+                    print(rawLine, end="")
+                    foundAny = True
 
-        if not found_any:
+        if not foundAny:
             sys.exit(1)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)

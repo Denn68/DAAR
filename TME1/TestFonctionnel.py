@@ -3,11 +3,11 @@ import subprocess
 
 import RegEx as RegEx
 
-FILE_PATH = "babylone.txt"
+filePath = "babylone.txt"
 
-PATTERNS = [
+patterns = [
     "Sargon",
-    "S(a|g|r)+on", 
+    "S(a|g|r)+on",
     "Sa.*on",
     "S(ar|ra)gon",
     "Sargon+",
@@ -15,36 +15,36 @@ PATTERNS = [
     "Akkad",
 ]
 
-def run_custom(pattern: str, file_path: str):
+def runCustom(pattern: str, filePath: str):
     regEx = RegEx.RegEx(pattern)
-    dfa = regEx.to_nfa().to_dfa().minimize()
+    dfa = regEx.toNfa().toDfa().minimize()
     out = []
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+    with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
         for raw in f:
             line = raw.rstrip("\n")
-            if dfa.search(line):     
+            if dfa.search(line):
                 out.append(line)
     return out
 
-def find_grep_cmd():
+def findGrepCmd():
     try:
-        subprocess.run(["egrep", "-E"] + ["--version"], capture_output=True)
+        subprocess.run(["egrep", "-E", "--version"], capture_output=True)
         return ["egrep", "-E"]
     except Exception:
         pass
     print("ERROR: ni 'egrep' ni 'grep -E' trouvés.", file=sys.stderr)
     sys.exit(3)
 
-def run_egrep(pattern: str, file_path: str, grep_cmd):
+def runEgrep(pattern: str, filePath: str, grepCmd):
     res = subprocess.run(
-        grep_cmd + [pattern, file_path],
+        grepCmd + [pattern, filePath],
         capture_output=True, text=True, encoding="utf-8"
     )
     if res.returncode not in (0, 1):
         print(f"ERROR pattern={pattern!r} -> {res.stderr.strip()}", file=sys.stderr)
     return [ln.rstrip("\n") for ln in res.stdout.splitlines()]
 
-def show_diff(title, lines, limit=5):
+def showDiff(title, lines, limit=5):
     if not lines:
         print(f"  {title}: (rien)")
         return
@@ -57,46 +57,46 @@ def show_diff(title, lines, limit=5):
 
 def main():
     try:
-        with open(FILE_PATH, "r", encoding="utf-8", errors="ignore") as _:
+        with open(filePath, "r", encoding="utf-8", errors="ignore"):
             pass
     except Exception as e:
-        print(f"ERROR: impossible d'ouvrir {FILE_PATH}: {e}", file=sys.stderr)
+        print(f"ERROR: impossible d'ouvrir {filePath}: {e}", file=sys.stderr)
         sys.exit(2)
 
-    grep_cmd = find_grep_cmd()
+    grepCmd = findGrepCmd()
 
-    all_ok = True
+    allOk = True
 
-    for pat in PATTERNS:
+    for pat in patterns:
         print(f"REGEX : {pat!r}")
         try:
-            customResult = run_custom(pat, FILE_PATH)
+            customResult = runCustom(pat, filePath)
         except Exception as e:
             print(f" ERROR {e}")
             print("-" * 60)
-            all_ok = False
+            allOk = False
             continue
 
-        egrepResult = run_egrep(pat, FILE_PATH, grep_cmd)
+        egrepResult = runEgrep(pat, filePath, grepCmd)
 
-        setCustomResult   = set(customResult)
+        setCustomResult = set(customResult)
         setEgrepResult = set(egrepResult)
 
-        posDiff   = setCustomResult - setEgrepResult
+        posDiff = setCustomResult - setEgrepResult
         negDiff = setEgrepResult - setCustomResult
 
         if not posDiff and not negDiff:
             print("OK✅")
         else:
-            all_ok = False
+            allOk = False
             print("PAS OK❌")
             print("Différences:")
-            show_diff("CUSTOM", posDiff)
-            show_diff("EGREP ", negDiff)
+            showDiff("CUSTOM", posDiff)
+            showDiff("EGREP ", negDiff)
 
         print("-" * 50)
 
-    sys.exit(0 if all_ok else 1)
+    sys.exit(0 if allOk else 1)
 
 if __name__ == "__main__":
     main()
