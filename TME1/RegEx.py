@@ -8,7 +8,7 @@ class RegExTree:
     sub: Tuple["RegExTree", ...] = ()
 
     def _label(self) -> str:
-        if self.root == RegEx.CONCAT: return "·"  
+        if self.root == RegEx.CONCAT: return "·"
         if self.root == RegEx.ETOILE: return "*"
         if self.root == RegEx.ALTERN: return "|"
         if self.root == RegEx.DOT:    return "."
@@ -20,7 +20,7 @@ class RegExTree:
             return self._label()
         return f"{self._label()}(" + ",".join(str(c) for c in self.sub) + ")"
 
-EPSILON: Optional[str] = None  
+EPSILON: Optional[str] = None
 
 class NFA:
     def __init__(self):
@@ -38,7 +38,7 @@ class NFA:
 
     def add_edge(self, src: int, symbol: Optional[str], dst: int) -> None:
         self.transitions.setdefault(src, []).append((symbol, dst))
-        self.transitions.setdefault(dst, self.transitions.get(dst, []))  
+        self.transitions.setdefault(dst, self.transitions.get(dst, []))
 
     def __str__(self) -> str:
         lines = []
@@ -72,12 +72,6 @@ class NFA:
                         out.add(nxt)
             return out
 
-        alphabet: Set[str] = set()
-        for s, edges in self.transitions.items():
-            for sym, _ in edges:
-                if sym is not None and sym != ".":
-                    alphabet.add(sym)
-
         def move_dot(states: Set[int]) -> Set[int]:
             out: Set[int] = set()
             for s in states:
@@ -86,10 +80,21 @@ class NFA:
                         out.add(nxt)
             return out
 
+        literals: Set[str] = set()
+        has_dot = False
+        for s, edges in self.transitions.items():
+            for sym, _ in edges:
+                if sym is None:
+                    continue
+                if sym == ".":
+                    has_dot = True
+                else:
+                    literals.add(sym)
+
         start_set = frozenset(eps_closure({self.start}))
 
         dfa = DFA()
-        dfa.alphabet = set(alphabet)
+        dfa.alphabet = set(literals)
 
         subset_to_q: Dict[FrozenSet[int], int] = {start_set: 0}
         dfa.transitions[0] = {}
@@ -103,8 +108,21 @@ class NFA:
             S = worklist.pop()
             q = subset_to_q[S]
 
-            for a in alphabet:
-                target_core = move(S, a) | move_dot(S)
+            Tdot_core = move_dot(S) if has_dot else set()
+            if Tdot_core:
+                Tdot = frozenset(eps_closure(Tdot_core))
+                if Tdot not in subset_to_q:
+                    subset_to_q[Tdot] = len(subset_to_q)
+                    dfa.transitions[subset_to_q[Tdot]] = {}
+                    if self.accept in Tdot:
+                        dfa.accepts.add(subset_to_q[Tdot])
+                    worklist.append(Tdot)
+                dfa.transitions[q]["."] = subset_to_q[Tdot]
+
+            for a in literals:
+                target_core = move(S, a)
+                if has_dot:
+                    target_core |= Tdot_core
                 if not target_core:
                     continue
                 T = frozenset(eps_closure(target_core))
@@ -115,8 +133,6 @@ class NFA:
                         dfa.accepts.add(subset_to_q[T])
                     worklist.append(T)
                 dfa.transitions[q][a] = subset_to_q[T]
-
-          
 
         return dfa
 
@@ -145,7 +161,7 @@ class DFA:
         stack = [self.start]
         while stack:
             q = stack.pop()
-            if q in seen: 
+            if q in seen:
                 continue
             seen.add(q)
             for a, qq in self.transitions.get(q, {}).items():
@@ -160,6 +176,8 @@ class DFA:
                 if a not in outs:
                     need_sink = True
                     break
+            if "." not in outs:
+                need_sink = True
             if need_sink:
                 break
         if not need_sink:
@@ -168,12 +186,15 @@ class DFA:
         sink = max(self.transitions.keys()) + 1 if self.transitions else 0
         self.transitions.setdefault(sink, {})
         for a in self.alphabet:
-            self.transitions[sink][a] = sink  
+            self.transitions[sink][a] = sink
+        self.transitions[sink]["."] = sink
         for q in list(self.transitions.keys()):
             self.transitions.setdefault(q, {})
             for a in self.alphabet:
                 if a not in self.transitions[q]:
                     self.transitions[q][a] = sink
+            if "." not in self.transitions[q]:
+                self.transitions[q]["."] = sink
 
     def minimize(self) -> "DFA":
         reachable = self._reachable()
@@ -213,7 +234,7 @@ class DFA:
 
                 for q in block:
                     sig: List[int] = []
-                    for a in sorted(self.alphabet):
+                    for a in sorted(self.alphabet) + ["."]:
                         qq = self.transitions[q][a]
                         sig.append(class_of[qq])
                     tup = tuple(sig)
@@ -226,7 +247,6 @@ class DFA:
 
             P = newP
 
-        rep_to_id: Dict[int, int] = {}
         state_to_block: Dict[int, int] = {}
         for i, block in enumerate(P):
             for q in block:
@@ -240,6 +260,7 @@ class DFA:
             rep = next(iter(block))
             for a in sorted(dfa.alphabet):
                 dfa.transitions[i][a] = state_to_block[self.transitions[rep][a]]
+            dfa.transitions[i]["."] = state_to_block[self.transitions[rep]["."]]
             if block & self.accepts:
                 dfa.accepts.add(i)
 
@@ -247,17 +268,19 @@ class DFA:
 
     def search(self, text: str):
         results = []
-        alpha = self.alphabet
-
         n = len(text)
         for i in range(n):
             q = self.start
             accepted_end = None
             for j in range(i, n):
                 ch = text[j]
-                if ch not in self.transitions.get(q, {}):
+                outs = self.transitions.get(q, {})
+                qq = outs.get(ch)
+                if qq is None:
+                    qq = outs.get(".")
+                if qq is None:
                     break
-                q = self.transitions[q][ch]
+                q = qq
                 if q in self.accepts:
                     accepted_end = j + 1
             if accepted_end is not None:
@@ -271,11 +294,11 @@ class RegEx:
     DOT    = 0xD07
     PLUS   = 0xA11ADD
 
-    _PREC = {  
-        ETOILE: 3,  
+    _PREC = {
+        ETOILE: 3,
         PLUS:   3,
-        CONCAT: 2,   
-        ALTERN: 1,   
+        CONCAT: 2,
+        ALTERN: 1,
     }
 
     def __init__(self, pattern: str):
@@ -285,7 +308,7 @@ class RegEx:
         postfix = self._to_postfix(tokens)
         self.tree = self._postfix_to_tree(postfix)
 
-    def _tokenize(self, s: str) -> List[object]:  
+    def _tokenize(self, s: str) -> List[object]:
         out: List[object] = []
         i = 0
         n = len(s)
@@ -330,7 +353,6 @@ class RegEx:
                     out.append(self.CONCAT)
         return out
 
-
     def _to_postfix(self, tokens: List[object]) -> List[object]:
         out: List[object] = []
         ops: List[int] = []
@@ -338,7 +360,7 @@ class RegEx:
             if self._is_literal(t) or t == self.DOT:
                 out.append(t)
             elif t == self.ETOILE or t == getattr(self, "PLUS", None):
-                out.append(t) 
+                out.append(t)
             elif t in (self.CONCAT, self.ALTERN):
                 while ops and ops[-1] not in (ord('('), ord(')')) and \
                     self._PREC.get(ops[-1], 0) >= self._PREC.get(t, 0):
@@ -382,7 +404,6 @@ class RegEx:
             raise ValueError("Construction d'arbre invalide")
         return stack[0]
 
-
     def match(self, text: str) -> bool:
         memo: Dict[Tuple[int, int, Tuple[int, ...]], Set[int]] = {}
         ends = self._advance(self.tree, 0, text, memo)
@@ -396,7 +417,7 @@ class RegEx:
 
         if not node.sub:
             if i < len(s):
-                if node.root == self.DOT:               
+                if node.root == self.DOT:
                     res = {i + 1}
                 else:
                     res = {i + 1} if s[i] == chr(node.root) else set()
@@ -428,7 +449,6 @@ class RegEx:
 
         memo[key] = res
         return res
-
 
     def ascii_codes(self) -> str:
         return "[" + ",".join(str(ord(c)) for c in self.pattern) + "]"
@@ -465,19 +485,19 @@ class RegEx:
                 s = nfa.new_state()
                 t = nfa.new_state()
                 c_start, c_accept = build(node.sub[0], nfa)
-                nfa.add_edge(s, EPSILON, t)            
-                nfa.add_edge(s, EPSILON, c_start)      
-                nfa.add_edge(c_accept, EPSILON, t)   
-                nfa.add_edge(c_accept, EPSILON, c_start)  
+                nfa.add_edge(s, EPSILON, t)
+                nfa.add_edge(s, EPSILON, c_start)
+                nfa.add_edge(c_accept, EPSILON, t)
+                nfa.add_edge(c_accept, EPSILON, c_start)
                 return s, t
 
-            if node.root == self.PLUS:                                  
+            if node.root == self.PLUS:
                 s = nfa.new_state()
                 t = nfa.new_state()
                 c_start, c_accept = build(node.sub[0], nfa)
-                nfa.add_edge(s, EPSILON, c_start)  
-                nfa.add_edge(c_accept, EPSILON, t)  
-                nfa.add_edge(c_accept, EPSILON, c_start) 
+                nfa.add_edge(s, EPSILON, c_start)
+                nfa.add_edge(c_accept, EPSILON, t)
+                nfa.add_edge(c_accept, EPSILON, c_start)
                 return s, t
 
             raise RuntimeError("Nœud inconnu")
@@ -488,51 +508,30 @@ class RegEx:
         return nfa
 
 def main(argv: List[str]) -> None:
-    if len(argv) > 1:
-        pattern = argv[1]
-    else:
-        try:
-            pattern = input("  >> Please enter a regEx: ").strip()
-        except EOFError:
-            pattern = ""
+    if len(argv) < 3:
+        print("usage: python RegEx.py <regex> <file>", file=sys.stderr)
+        sys.exit(2)
 
-    print(f'  >> Parsing regEx "{pattern}".')
-    if len(pattern) < 1:
-        print("  >> ERROR: empty regEx.", file=sys.stderr)
-    else:
-        try:
-            rx = RegEx(pattern)
-            print(f"  >> ASCII codes: {rx.ascii_codes()}.")
-            print(f"  >> Tree: {rx.tree}.")
+    pattern = argv[1]
+    file_path = argv[2]
 
-            nfa = rx.to_nfa()
-            print("  >> NFA (epsilon):")
-            print(nfa)
+    try:
+        rx = RegEx(pattern)
+        min_dfa = rx.to_nfa().to_dfa().minimize()
 
-            dfa = nfa.to_dfa()
-            print("  >> DFA (determinized):")
-            print(dfa)
+        found_any = False
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for raw_line in f:
+                line = raw_line.rstrip("\n")
+                if min_dfa.search(line):
+                    print(raw_line, end="")
+                    found_any = True
 
-            min_dfa = dfa.minimize()
-            print("  >> DFA (minimized):")
-            print(min_dfa)
-
-            if len(argv) > 2:
-                file_path = argv[2]
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    text = f.read()
-
-                matches = min_dfa.search(text)
-                print(f"  >> Found {len(matches)} match(es).")
-                for k, (i, j, m) in enumerate(matches[:10], 1):
-                    start_ctx = max(0, i - 30)
-                    end_ctx = min(len(text), j + 30)
-                    ctx = text[start_ctx:end_ctx].replace("\n", " ")
-                    print(f"    {k:02d}. [{i}:{j}] {m!r}  ...{ctx}...")
-        except Exception as e:
-            print(f'  >> ERROR: syntax error for regEx "{pattern}": {e}', file=sys.stderr)
-
-    print("  >> Parsing completed.")
+        if not found_any:
+            sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
 
 if __name__ == "__main__":
     main(sys.argv)
