@@ -265,12 +265,12 @@ class RegEx:
 
     def __init__(self, pattern: str):
         self.pattern = pattern
-        tokens = self.tokenize(pattern)
+        tokens = self.parse(pattern)             
         tokens = self.insertConcats(tokens)
         postfix = self.toPostfix(tokens)
         self.tree = self.postfixToTree(postfix)
 
-    def tokenize(self, s: str) -> List[object]:
+    def parse(self, s: str) -> List[object]:   
         out: List[object] = []
         i = 0
         n = len(s)
@@ -423,6 +423,7 @@ class RegEx:
         s, t = build(self.tree, nfa)
         nfa.start, nfa.accept = s, t
         return nfa
+
 
 def main(argv: List[str]) -> None:
     if len(argv) < 3:
