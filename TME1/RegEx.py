@@ -434,8 +434,8 @@ def main(argv: List[str]) -> None:
     filePath = argv[2]
 
     try:
-        rx = RegEx(pattern)
-        minDfa = rx.toNfa().toDfa().minimize()
+        regEx = RegEx(pattern)
+        minDfa = regEx.toNfa().toDfa().minimize()
 
         foundAny = False
         with open(filePath, "r", encoding="utf-8", errors="ignore") as f:
