@@ -1,0 +1,313 @@
+# Create or update a query ruleset
+/*PUT /_query_rules/my-ruleset
+{
+"rules": [
+  {
+    "rule_id": "rule1",
+    "type": "pinned",
+    "criteria": [
+      {
+        "type": "fuzzy",
+        "metadata": "query_string",
+        "values": [ "puggles", "pugs" ]
+      },
+      {
+        "type": "exact",
+        "metadata": "user_country",
+        "values": [ "us" ]
+      }
+    ],
+    "actions": {
+      "docs": [
+        {
+          "_index": "my-index-000001",
+          "_id": "id1"
+        },
+        {
+          "_index": "my-index-000002",
+          "_id": "id2"
+        }
+      ]
+    }
+  },
+  {
+    "rule_id": "rule2",
+    "type": "exclude",
+    "criteria": [
+      {
+        "type": "contains",
+        "metadata": "query_string",
+        "values": [ "beagles" ]
+      }
+    ],
+    "actions": {
+      "docs": [
+        {
+          "_index": "my-index-000001",
+          "_id": "id3"
+        },
+        {
+          "_index": "my-index-000002",
+          "_id": "id4"
+        }
+      ]
+    }
+  }
+]
+}*/
+
+
+// Q1-Q2
+GET ny_restaurants/_search
+{
+  "size": 0,
+  "aggs": {
+    "unique_neighborhoods": {
+      "cardinality": {
+        "field": "NTA"
+      }
+    },
+    "neighborhoods": {
+      "terms": {
+        "field": "NTA",
+        "size": 1000,
+        "order": { "_count": "desc" }
+      },
+      "aggs": {
+        "boro": {
+          "terms": { "field": "BORO", "size": 1 }
+        }
+      }
+    }
+  }
+}
+
+// Q3
+GET ny_restaurants/_search
+{
+  "_source": ["VIOLATION CODE", "VIOLATION DESCRIPTION"],
+  "query": {
+    "term": {
+      "VIOLATION CODE": "04N"
+    }
+  },
+  "size": 1
+}
+
+// Q4
+GET ny_restaurants/_search
+{
+  "_source": ["DBA","BORO","BUILDING","STREET","ZIPCODE","NTA","GRADE"],
+  "query": {
+    "term": { "GRADE": "A" }
+  },
+  "collapse": {
+    "field": "CAMIS"
+  },
+  "sort": [
+    { "NTA": { "order": "asc", "missing": "_last" } },
+    { "CAMIS": { "order": "asc" } }
+  ],
+  "size": 10000,
+  "track_total_hits": true
+}
+
+// Q5
+GET ny_restaurants/_search
+{
+  "size": 0,
+  "aggs": {
+    "cuisines": {
+      "terms": {
+        "field": "CUISINE DESCRIPTION",
+        "size": 1,
+        "order": { "unique_restaurants": "desc" }
+      },
+      "aggs": {
+        "unique_restaurants": {
+          "cardinality": { "field": "CAMIS", "precision_threshold": 40000 }
+        }
+      }
+    }
+  }
+}
+
+GET ny_restaurants/_search
+{
+  "size": 0,
+  "aggs": {
+    "by_nta": {
+      "terms": {
+        "field": "NTA",
+        "size": 1000,
+        "order": { "_key": "asc" }
+      },
+      "aggs": {
+        "top_cuisine": {
+          "terms": {
+            "field": "CUISINE DESCRIPTION",
+            "size": 1,
+            "order": { "unique_restaurants": "desc" }
+          },
+          "aggs": {
+            "unique_restaurants": {
+              "cardinality": { "field": "CAMIS", "precision_threshold": 40000 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// Q6
+GET ny_restaurants/_search
+{
+  "size": 0,
+  "aggs": {
+    "last_inspection": {
+      "max": {
+        "field": "INSPECTION DATE",
+        "format": "yyyy-MM-dd"
+      }
+    }
+  }
+}
+
+// Q7
+GET ny_restaurants/_search
+{
+  "_source": ["DBA","BUILDING","STREET","BORO","ZIPCODE","NTA","GRADE","CUISINE DESCRIPTION"],
+  "track_total_hits": true,
+  "query": {
+    "bool": {
+      "must": [
+        { "term": { "BORO": "Brooklyn" } },
+        { "term": { "GRADE": "A" } },
+        { "term": { "CUISINE DESCRIPTION": "Chinese" } }
+      ]
+    }
+  },
+  "collapse": { "field": "CAMIS" },
+  "aggs": {
+    "distinct_restaurants": {
+      "cardinality": { "field": "CAMIS", "precision_threshold": 40000 }
+    }
+  },
+  "sort": [
+    { "NTA":   { "order": "asc", "missing": "_last" } },
+    { "CAMIS": { "order": "asc" } }
+  ],
+  "size": 10000
+}
+
+// Q8
+GET ny_restaurants/_search
+{
+  "_source": ["DBA","BUILDING","STREET","BORO","ZIPCODE","NTA","CAMIS"],
+  "query": {
+    "match": {
+      "DBA": {
+        "query": "LADUREE",
+        "operator": "and"
+      }
+    }
+  },
+  "aggs": {
+    "distinct_restaurants": {
+      "cardinality": { "field": "CAMIS", "precision_threshold": 40000 }
+    }
+  },
+  "collapse": { "field": "CAMIS" },
+  "size": 100
+}
+
+// Q9
+GET ny_restaurants/_search
+{
+  "size": 0,
+  "query": {
+    "match_phrase": {
+      "VIOLATION DESCRIPTION": "Hot TCS food item not held at or above 140 °F."
+    }
+  },
+  "aggs": {
+    "by_cuisine": {
+      "terms": {
+        "field": "CUISINE DESCRIPTION",
+        "size": 1,
+        "order": { "affected_restaurants": "desc" }
+      },
+      "aggs": {
+        "affected_restaurants": {
+          "cardinality": { "field": "CAMIS", "precision_threshold": 40000 }
+        }
+      }
+    }
+  }
+}
+
+// Q10
+GET ny_restaurants/_search
+{
+  "size": 0,
+  "aggs": {
+    "top_violations": {
+      "terms": {
+        "field": "VIOLATION CODE",
+        "size": 5,
+        "order": { "_count": "desc" }   // top 5 par nombre d'occurrences
+      },
+      "aggs": {
+        "example_description": {
+          "top_hits": {
+            "_source": ["VIOLATION CODE", "VIOLATION DESCRIPTION"],
+            "size": 1
+          }
+        },
+        "affected_restaurants": {
+          "cardinality": { "field": "CAMIS", "precision_threshold": 40000 }
+        }
+      }
+    }
+  }
+}
+
+// Q11
+GET ny_restaurants/_search
+{
+  "size": 0,
+  "runtime_mappings": {
+    "DBA_kw": {
+      "type": "keyword",
+      "script": "if (doc.containsKey('DBA') && !doc['DBA'].empty) emit(doc['DBA'].value.toLowerCase());"
+    }
+  },
+  "aggs": {
+    "chains": {
+      "composite": {
+        "size": 1000,                      // page size
+        "sources": [
+          { "dba": { "terms": { "field": "DBA_kw" } } }
+        ]
+      },
+      "aggs": {
+        "locations": {
+          "cardinality": { "field": "CAMIS", "precision_threshold": 10000 }
+        }
+      }
+    }
+  }
+}
+
+
+
+
+GET ny_restaurants/_mapping
+
+
+
+
+
+
+
