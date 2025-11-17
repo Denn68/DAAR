@@ -542,6 +542,7 @@ def db_status():
     finally:
         put_conn(conn)
 
+ALLOWED_BOOK_FIELDS = {"title", "author", "content", "lang"}
 # Route pour la recherche avancée par regex
 @app.post("/search/advanced", response_model=SearchResponse)
 def search_advanced(req: SearchRequest):
