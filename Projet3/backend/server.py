@@ -545,48 +545,69 @@ def db_status():
 # Route pour la recherche avancée par regex
 @app.post("/search/advanced", response_model=SearchResponse)
 def search_advanced(req: SearchRequest):
-    # Compile le motif RegEx via TON moteur
+    # 1) Compile le motif RegEx via TON moteur
     try:
         regEx = RegEx(req.pattern)
         dfa = regEx.toNfa().toDfa().minimize()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Pattern invalide: {e}")
 
-    # ------------------------------------------------------------------
-    # TODO: EFFECTUER LA RECHERCHE EN BASE POUR RÉCUPÉRER TOUS LES LIVRES
-    # Ex: SELECT id, title, content FROM books;
-    #
-    # conn = get_conn()
-    # try:
-    #     with conn.cursor() as cur:
-    #         cur.execute("SELECT id, title, content FROM books;")
-    #         rows = cur.fetchall()
-    #         books = [{"id": r[0], "title": r[1], "content": r[2]} for r in rows]
-    # finally:
-    #     put_conn(conn)
-    #
-    # books: Iterable[Dict[str, Any]]
-    # ------------------------------------------------------------------
-    books: List[Dict[str, Any]] = []  # ← Remplacer par la récupération DB quand prête
+    # 2) Validation des champs demandés
+    if not req.fields:
+        req.fields = ["title", "content"]
 
+    for f in req.fields:
+        if f not in ALLOWED_BOOK_FIELDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Champ inconnu dans 'fields': {f}. Champs autorisés: {sorted(ALLOWED_BOOK_FIELDS)}"
+            )
+
+    # 3) Récupération des livres en base
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # On va chercher toutes les colonnes utiles
+            cur.execute("""
+                SELECT id, gutenberg_id, title, author, content, lang
+                FROM books;
+            """)
+            rows = cur.fetchall()
+
+        books: List[Dict[str, Any]] = []
+        for (bid, gid, title, author, content, lang) in rows:
+            books.append({
+                "id": bid,
+                "gutenberg_id": gid,
+                "title": title or "",
+                "author": author or "",
+                "content": content or "",
+                "lang": lang or "",
+            })
+    finally:
+        put_conn(conn)
+
+    # 4) Parcours des livres et application du DFA
     total_scanned = 0
     results: List[BookResult] = []
 
     for book in books:
         total_scanned += 1
+
+        # Concatène uniquement les champs demandés (par défaut: title + content)
         parts = [str(book.get(f, "")) for f in req.fields]
         full_text = "\n".join(parts)
 
-        # booléen: présence littérale du textInput
+        # booléen: présence littérale du textInput dans le texte concaténé
         text_input_found = bool(req.textInput) and (req.textInput in full_text)
 
-        # booléen: correspondance du motif via DFA (nouvelle méthode)
+        # booléen: correspondance du motif via DFA (substring match)
         pattern_found = dfa.matches(full_text)
 
         if text_input_found or pattern_found:
             results.append(BookResult(
                 book=book,
-                patternMatches=[],  # seulement le booléen demandé
+                patternMatches=[],        # tu as demandé juste le booléen, donc on laisse vide
                 textInputFound=text_input_found
             ))
 
@@ -595,6 +616,7 @@ def search_advanced(req: SearchRequest):
         total_books_matched=len(results),
         results=results,
     )
+
 
 if __name__ == "__main__":
     import uvicorn
