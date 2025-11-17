@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./db.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    ports: ["5432:5432"]
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://appuser:secret@db:5432/appdb
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+      DB_CONNECT_MAX_WAIT: "45"
+      DB_HOST: db
+      DB_PORT: "5432"
+    depends_on:
+      - db
+    ports: ["8000:8000"]
+    volumes:
+      - ./:/app
+
+volumes:
+  dbdata:

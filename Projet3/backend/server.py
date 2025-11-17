@@ -3,8 +3,18 @@ from typing import List, Tuple, Dict, Set, Optional, FrozenSet, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import os
+import time
+import asyncio
+from contextlib import asynccontextmanager
 
-# CODE REGEX TME 1
+import psycopg2
+from psycopg2.pool import SimpleConnectionPool
+from psycopg2 import OperationalError
+
+# =======================
+#   CODE REGEX TME 1
+# =======================
 @dataclass(frozen=True)
 class RegExTree:
     root: int
@@ -231,11 +241,10 @@ class DFA:
 
         return dfa
 
-    # --------- NOUVEAU: booléen, early-exit ----------
+    # --------- booléen, early-exit ----------
     def matches(self, text: str) -> bool:
         """
-        Retourne True s'il existe AU MOINS UNE correspondance
-        (substring) du motif dans `text`. Retourne False sinon.
+        True s'il existe AU MOINS UNE correspondance (substring) du motif dans `text`.
         """
         n = len(text)
         for i in range(n):
@@ -250,9 +259,8 @@ class DFA:
                     break
                 q = qq
                 if q in self.accepts:
-                    return True  # early-exit dès la 1ère trouvée
+                    return True
         return False
-
 
 class RegEx:
     CONCAT = 0xC04CA7
@@ -429,16 +437,64 @@ class RegEx:
         nfa.start, nfa.accept = s, t
         return nfa
 
-# CODE REGEX TME 1
+# =======================
+#   APP + DB CONNECTION (lifespan)
+# =======================
+DATABASE_URL = os.getenv("DATABASE_URL", "postgres://appuser:secret@db:5432/appdb")
+DB_POOL: Optional[SimpleConnectionPool] = None
 
+async def _try_init_pool(max_wait: int = 45) -> None:
+    """Essaie de créer le pool pendant max_wait secondes sans faire échouer le démarrage."""
+    global DB_POOL
+    deadline = time.time() + max_wait
+    last_err: Optional[Exception] = None
+    while time.time() < deadline:
+        try:
+            DB_POOL = SimpleConnectionPool(minconn=1, maxconn=5, dsn=DATABASE_URL)
+            print("[DB] Pool initialisé")
+            return
+        except OperationalError as e:
+            last_err = e
+            await asyncio.sleep(1)
+    print(f"[DB] Pool non initialisé après {max_wait}s: {last_err}")
 
-app = FastAPI(title="Advanced Book Search API", version="1.0.0")
+def _pool_ready() -> bool:
+    return DB_POOL is not None
+
+def get_conn():
+    """Récupère une connexion, avec petit retry si le pool n'est pas prêt."""
+    global DB_POOL
+    for _ in range(5):
+        if DB_POOL is not None:
+            return DB_POOL.getconn()
+        time.sleep(0.5)
+    raise HTTPException(status_code=503, detail="Database not ready")
+
+def put_conn(conn):
+    if DB_POOL:
+        DB_POOL.putconn(conn)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _try_init_pool(max_wait=int(os.getenv("DB_CONNECT_MAX_WAIT", "45")))
+    yield
+    global DB_POOL
+    if DB_POOL:
+        DB_POOL.closeall()
+        DB_POOL = None
+
+app = FastAPI(title="Advanced Book Search API", version="1.0.0", lifespan=lifespan)
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
 
+# =======================
+#   MODELS
+# =======================
 class SearchRequest(BaseModel):
     pattern: str = Field(..., description="Expression régulière (syntaxe simplifiée)")
     textInput: str = Field(..., description="Texte d'entrée utilisateur (à vérifier dans chaque livre)")
@@ -459,19 +515,34 @@ class SearchResponse(BaseModel):
     total_books_matched: int
     results: List[BookResult]
 
-
+# =======================
+#   ROUTES
+# =======================
 @app.get("/")
 def root():
     return {
         "name": "Advanced Book Search API",
-        "routes": ["/health", "/search/advanced"],
+        "routes": ["/health", "/db-status", "/search/advanced"],
     }
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "time": time.time()}
 
-#Route pour la recherche avancée par regex
+@app.get("/db-status")
+def db_status():
+    if not _pool_ready():
+        return {"db": "not-initialized"}
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1;")
+            (one,) = cur.fetchone()
+        return {"db": "ok", "result": one}
+    finally:
+        put_conn(conn)
+
+# Route pour la recherche avancée par regex
 @app.post("/search/advanced", response_model=SearchResponse)
 def search_advanced(req: SearchRequest):
     # Compile le motif RegEx via TON moteur
@@ -483,17 +554,26 @@ def search_advanced(req: SearchRequest):
 
     # ------------------------------------------------------------------
     # TODO: EFFECTUER LA RECHERCHE EN BASE POUR RÉCUPÉRER TOUS LES LIVRES
-    # books = query_all_books_from_db()
+    # Ex: SELECT id, title, content FROM books;
+    #
+    # conn = get_conn()
+    # try:
+    #     with conn.cursor() as cur:
+    #         cur.execute("SELECT id, title, content FROM books;")
+    #         rows = cur.fetchall()
+    #         books = [{"id": r[0], "title": r[1], "content": r[2]} for r in rows]
+    # finally:
+    #     put_conn(conn)
+    #
     # books: Iterable[Dict[str, Any]]
     # ------------------------------------------------------------------
-    books: List[Dict[str, Any]] = []  # ← Remplacer par la récupération DB
+    books: List[Dict[str, Any]] = []  # ← Remplacer par la récupération DB quand prête
 
     total_scanned = 0
     results: List[BookResult] = []
 
     for book in books:
         total_scanned += 1
-
         parts = [str(book.get(f, "")) for f in req.fields]
         full_text = "\n".join(parts)
 
@@ -504,10 +584,9 @@ def search_advanced(req: SearchRequest):
         pattern_found = dfa.matches(full_text)
 
         if text_input_found or pattern_found:
-            # plus de spans : on renvoie une liste vide (tu ne veux que le booléen)
             results.append(BookResult(
                 book=book,
-                patternMatches=[],
+                patternMatches=[],  # seulement le booléen demandé
                 textInputFound=text_input_found
             ))
 
@@ -516,3 +595,9 @@ def search_advanced(req: SearchRequest):
         total_books_matched=len(results),
         results=results,
     )
+
+if __name__ == "__main__":
+    import uvicorn
+    host = os.getenv("APP_HOST", "0.0.0.0")
+    port = int(os.getenv("APP_PORT", "8000"))
+    uvicorn.run("server:app", host=host, port=port, reload=False)
